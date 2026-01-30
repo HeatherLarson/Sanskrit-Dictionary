@@ -19,6 +19,11 @@ export default {
 			}
 		},
 		extend: {
+			fontFamily: {
+				sans: ['Inter Variable', 'Inter', 'system-ui', 'sans-serif'],
+				serif: ['Cormorant Variable', 'Cormorant', 'Georgia', 'serif'],
+				devanagari: ['Noto Sans Devanagari', 'system-ui', 'sans-serif'],
+			},
 			colors: {
 				border: 'hsl(var(--border))',
 				input: 'hsl(var(--input))',
@@ -62,7 +67,12 @@ export default {
 					'accent-foreground': 'hsl(var(--sidebar-accent-foreground))',
 					border: 'hsl(var(--sidebar-border))',
 					ring: 'hsl(var(--sidebar-ring))'
-				}
+				},
+				saffron: 'hsl(var(--saffron))',
+				sage: 'hsl(var(--sage))',
+				sand: 'hsl(var(--sand))',
+				lotus: 'hsl(var(--lotus))',
+				gold: 'hsl(var(--gold))',
 			},
 			borderRadius: {
 				lg: 'var(--radius)',
