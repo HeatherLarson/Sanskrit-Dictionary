@@ -1,12 +1,24 @@
 import { useState, useMemo } from 'react';
 import { useSeoMeta } from '@unhead/react';
-import { Search, BookOpen, Heart, Volume2, X, Sparkles, ExternalLink } from 'lucide-react';
+import {
+  Search,
+  BookOpen,
+  Heart,
+  Volume2,
+  X,
+  Sparkles,
+  ExternalLink,
+  Users,
+  Loader2,
+} from 'lucide-react';
 
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
   Dialog,
   DialogContent,
@@ -16,13 +28,20 @@ import {
 } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
-import { useLocalStorage } from '@/hooks/useLocalStorage';
+import { LoginArea } from '@/components/auth/LoginArea';
+import { AddTermDialog } from '@/components/AddTermDialog';
+
+import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useAuthor } from '@/hooks/useAuthor';
+import { useSanskritTerms } from '@/hooks/useSanskritTerms';
+import { useFavorites } from '@/hooks/useFavorites';
+
 import {
-  sanskritDictionary,
-  searchDictionary,
+  searchWords,
+  getRelatedWords,
   categoryLabels,
   categoryColors,
-  getRelatedWords,
+  starterTerms,
   type Category,
   type SanskritWord,
 } from '@/lib/sanskritDictionary';
@@ -31,36 +50,46 @@ const Index = () => {
   useSeoMeta({
     title: 'Yogic Lexicon - Sanskrit Dictionary for Yoga Teachers',
     description:
-      'A beautiful, comprehensive Sanskrit dictionary designed for yoga teachers. Learn pronunciation, meaning, and usage of essential yoga terminology.',
+      'A community-powered Sanskrit dictionary on Nostr. Share and discover yoga terminology with fellow teachers worldwide.',
   });
+
+  const { user } = useCurrentUser();
+  const { data: nostrTerms, isLoading: isLoadingTerms } = useSanskritTerms();
+  const { favorites, isFavorite, toggleFavorite, isToggling } = useFavorites();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<Category | 'all'>('all');
   const [selectedWord, setSelectedWord] = useState<SanskritWord | null>(null);
-  const [favorites, setFavorites] = useLocalStorage<string[]>('yogic-lexicon:favorites', []);
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
+
+  // Use Nostr terms if available, otherwise show starter terms
+  const allTerms = useMemo(() => {
+    if (nostrTerms && nostrTerms.length > 0) {
+      return nostrTerms;
+    }
+    return starterTerms;
+  }, [nostrTerms]);
 
   const filteredWords = useMemo(() => {
     const category = selectedCategory === 'all' ? undefined : selectedCategory;
-    let results = searchDictionary(searchQuery, category);
+    let results = searchWords(allTerms, searchQuery, category);
 
     if (showFavoritesOnly) {
-      results = results.filter((word) => favorites.includes(word.id));
+      results = results.filter((word) => isFavorite(word.id));
     }
 
     return results;
-  }, [searchQuery, selectedCategory, showFavoritesOnly, favorites]);
-
-  const toggleFavorite = (wordId: string) => {
-    setFavorites((prev) =>
-      prev.includes(wordId) ? prev.filter((id) => id !== wordId) : [...prev, wordId]
-    );
-  };
+  }, [allTerms, searchQuery, selectedCategory, showFavoritesOnly, isFavorite]);
 
   const relatedWords = useMemo(() => {
     if (!selectedWord) return [];
-    return getRelatedWords(selectedWord.id);
-  }, [selectedWord]);
+    return getRelatedWords(allTerms, selectedWord.id);
+  }, [selectedWord, allTerms]);
+
+  const handleToggleFavorite = (word: SanskritWord) => {
+    if (!user) return;
+    toggleFavorite(word.id, word.pubkey || user.pubkey);
+  };
 
   const categories: (Category | 'all')[] = [
     'all',
@@ -73,6 +102,8 @@ const Index = () => {
     'anatomy',
     'ayurveda',
   ];
+
+  const isFromNostr = nostrTerms && nostrTerms.length > 0;
 
   return (
     <div className="min-h-screen bg-background">
@@ -94,14 +125,17 @@ const Index = () => {
         <div className="absolute bottom-20 left-1/3 w-24 h-24 bg-lotus/10 rounded-full blur-2xl animate-float" />
 
         <div className="relative container mx-auto px-4 py-16 md:py-24">
-          {/* Logo/Brand */}
-          <div className="flex items-center justify-center gap-3 mb-8 animate-fade-in">
-            <div className="w-12 h-12 rounded-full bg-gradient-to-br from-saffron to-lotus flex items-center justify-center shadow-lg">
-              <span className="font-devanagari text-2xl text-white">{'\u0913\u0902'}</span>
+          {/* Top Bar with Login */}
+          <div className="flex items-center justify-between mb-8 animate-fade-in">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-saffron to-lotus flex items-center justify-center shadow-lg">
+                <span className="font-devanagari text-2xl text-white">{'\u0913\u0902'}</span>
+              </div>
+              <span className="text-muted-foreground text-sm tracking-widest uppercase">
+                Yogic Lexicon
+              </span>
             </div>
-            <span className="text-muted-foreground text-sm tracking-widest uppercase">
-              Yogic Lexicon
-            </span>
+            <LoginArea className="max-w-60" />
           </div>
 
           {/* Main Title */}
@@ -111,8 +145,9 @@ const Index = () => {
               <span className="block text-gradient mt-2">for Yoga Teachers</span>
             </h1>
             <p className="text-lg md:text-xl text-muted-foreground max-w-2xl mx-auto animate-fade-in opacity-0 [animation-delay:300ms] [animation-fill-mode:forwards]">
-              Discover the sacred language of yoga. Learn pronunciation, meaning, and how to weave
-              ancient wisdom into your teaching.
+              A community-powered dictionary on{' '}
+              <span className="text-primary font-medium">Nostr</span>. Share your knowledge and
+              discover terms from yoga teachers worldwide.
             </p>
           </div>
 
@@ -147,16 +182,24 @@ const Index = () => {
           <div className="flex items-center justify-center gap-6 mt-8 text-sm text-muted-foreground animate-fade-in opacity-0 [animation-delay:700ms] [animation-fill-mode:forwards]">
             <div className="flex items-center gap-2">
               <BookOpen className="w-4 h-4" />
-              <span>{sanskritDictionary.length} terms</span>
+              <span>{allTerms.length} terms</span>
             </div>
+            {isFromNostr && (
+              <div className="flex items-center gap-2">
+                <Users className="w-4 h-4" />
+                <span>Community powered</span>
+              </div>
+            )}
             <div className="flex items-center gap-2">
               <Sparkles className="w-4 h-4" />
               <span>8 categories</span>
             </div>
-            <div className="flex items-center gap-2">
-              <Heart className="w-4 h-4" />
-              <span>{favorites.length} saved</span>
-            </div>
+            {user && (
+              <div className="flex items-center gap-2">
+                <Heart className="w-4 h-4" />
+                <span>{favorites.length} saved</span>
+              </div>
+            )}
           </div>
         </div>
       </header>
@@ -165,17 +208,22 @@ const Index = () => {
       <main className="container mx-auto px-4 py-12">
         {/* Category Filters */}
         <div className="mb-8">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-4">
             <h2 className="font-serif text-xl text-foreground">Browse by Category</h2>
-            <Button
-              variant={showFavoritesOnly ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setShowFavoritesOnly(!showFavoritesOnly)}
-              className="gap-2"
-            >
-              <Heart className={`w-4 h-4 ${showFavoritesOnly ? 'fill-current' : ''}`} />
-              Favorites ({favorites.length})
-            </Button>
+            <div className="flex items-center gap-3">
+              {user && (
+                <Button
+                  variant={showFavoritesOnly ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setShowFavoritesOnly(!showFavoritesOnly)}
+                  className="gap-2"
+                >
+                  <Heart className={`w-4 h-4 ${showFavoritesOnly ? 'fill-current' : ''}`} />
+                  Favorites ({favorites.length})
+                </Button>
+              )}
+              {user && <AddTermDialog />}
+            </div>
           </div>
 
           <ScrollArea className="w-full">
@@ -187,9 +235,7 @@ const Index = () => {
                   size="sm"
                   onClick={() => setSelectedCategory(cat)}
                   className={`shrink-0 transition-all ${
-                    selectedCategory === cat
-                      ? 'shadow-md'
-                      : 'hover:bg-secondary/80'
+                    selectedCategory === cat ? 'shadow-md' : 'hover:bg-secondary/80'
                   }`}
                 >
                   {cat === 'all' ? 'All Terms' : categoryLabels[cat]}
@@ -199,181 +245,83 @@ const Index = () => {
           </ScrollArea>
         </div>
 
-        {/* Results Count */}
-        <div className="mb-6 flex items-center justify-between">
-          <p className="text-muted-foreground">
-            {filteredWords.length === 0
-              ? 'No terms found'
-              : `Showing ${filteredWords.length} term${filteredWords.length === 1 ? '' : 's'}`}
-          </p>
-          {searchQuery && (
-            <Button variant="ghost" size="sm" onClick={() => setSearchQuery('')}>
-              Clear search
-            </Button>
-          )}
-        </div>
-
-        {/* Dictionary Grid */}
-        {filteredWords.length > 0 ? (
+        {/* Loading State */}
+        {isLoadingTerms ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredWords.map((word, index) => (
-              <WordCard
-                key={word.id}
-                word={word}
-                isFavorite={favorites.includes(word.id)}
-                onToggleFavorite={() => toggleFavorite(word.id)}
-                onClick={() => setSelectedWord(word)}
-                index={index}
-              />
+            {[...Array(6)].map((_, i) => (
+              <Card key={i}>
+                <CardHeader className="pb-2">
+                  <Skeleton className="h-5 w-24 mb-2" />
+                  <Skeleton className="h-6 w-32" />
+                  <Skeleton className="h-5 w-20 mt-1" />
+                </CardHeader>
+                <CardContent>
+                  <Skeleton className="h-4 w-full mb-2" />
+                  <Skeleton className="h-4 w-3/4" />
+                </CardContent>
+              </Card>
             ))}
           </div>
         ) : (
-          <Card className="border-dashed">
-            <CardContent className="py-16 text-center">
-              <div className="w-16 h-16 rounded-full bg-muted mx-auto mb-4 flex items-center justify-center">
-                <Search className="w-8 h-8 text-muted-foreground" />
-              </div>
-              <h3 className="font-serif text-xl text-foreground mb-2">No terms found</h3>
-              <p className="text-muted-foreground max-w-md mx-auto">
-                {showFavoritesOnly
-                  ? "You haven't saved any favorites yet. Click the heart icon on any term to save it."
-                  : 'Try adjusting your search or browse by category to discover Sanskrit terms.'}
+          <>
+            {/* Results Count */}
+            <div className="mb-6 flex items-center justify-between">
+              <p className="text-muted-foreground">
+                {filteredWords.length === 0
+                  ? 'No terms found'
+                  : `Showing ${filteredWords.length} term${filteredWords.length === 1 ? '' : 's'}`}
+                {isFromNostr && (
+                  <span className="text-xs ml-2 text-primary">(from Nostr)</span>
+                )}
               </p>
-              {(searchQuery || showFavoritesOnly) && (
-                <Button
-                  variant="outline"
-                  className="mt-4"
-                  onClick={() => {
-                    setSearchQuery('');
-                    setShowFavoritesOnly(false);
-                    setSelectedCategory('all');
-                  }}
-                >
-                  Show all terms
+              {searchQuery && (
+                <Button variant="ghost" size="sm" onClick={() => setSearchQuery('')}>
+                  Clear search
                 </Button>
               )}
-            </CardContent>
-          </Card>
+            </div>
+
+            {/* Dictionary Grid */}
+            {filteredWords.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filteredWords.map((word, index) => (
+                  <WordCard
+                    key={`${word.id}-${word.pubkey || 'local'}`}
+                    word={word}
+                    isFavorite={isFavorite(word.id)}
+                    onToggleFavorite={() => handleToggleFavorite(word)}
+                    onClick={() => setSelectedWord(word)}
+                    index={index}
+                    isLoggedIn={!!user}
+                    isToggling={isToggling}
+                  />
+                ))}
+              </div>
+            ) : (
+              <EmptyState
+                showFavoritesOnly={showFavoritesOnly}
+                searchQuery={searchQuery}
+                onReset={() => {
+                  setSearchQuery('');
+                  setShowFavoritesOnly(false);
+                  setSelectedCategory('all');
+                }}
+              />
+            )}
+          </>
         )}
       </main>
 
       {/* Word Detail Modal */}
-      <Dialog open={!!selectedWord} onOpenChange={() => setSelectedWord(null)}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          {selectedWord && (
-            <>
-              <DialogHeader>
-                <div className="flex items-start justify-between">
-                  <div>
-                    <Badge className={`mb-3 ${categoryColors[selectedWord.category]}`}>
-                      {categoryLabels[selectedWord.category]}
-                    </Badge>
-                    <DialogTitle className="font-serif text-3xl">{selectedWord.sanskrit}</DialogTitle>
-                    <DialogDescription className="font-devanagari text-2xl mt-1 text-foreground/80">
-                      {selectedWord.devanagari}
-                    </DialogDescription>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => toggleFavorite(selectedWord.id)}
-                    className="shrink-0"
-                  >
-                    <Heart
-                      className={`w-5 h-5 ${
-                        favorites.includes(selectedWord.id)
-                          ? 'fill-lotus text-lotus'
-                          : 'text-muted-foreground'
-                      }`}
-                    />
-                  </Button>
-                </div>
-              </DialogHeader>
-
-              <Tabs defaultValue="meaning" className="mt-4">
-                <TabsList className="w-full">
-                  <TabsTrigger value="meaning" className="flex-1">
-                    Meaning
-                  </TabsTrigger>
-                  <TabsTrigger value="pronunciation" className="flex-1">
-                    Pronunciation
-                  </TabsTrigger>
-                  <TabsTrigger value="usage" className="flex-1">
-                    Usage
-                  </TabsTrigger>
-                </TabsList>
-
-                <TabsContent value="meaning" className="mt-4 space-y-4">
-                  <div>
-                    <h4 className="text-sm font-medium text-muted-foreground uppercase tracking-wider mb-2">
-                      Definition
-                    </h4>
-                    <p className="text-lg">{selectedWord.meaning}</p>
-                  </div>
-
-                  {selectedWord.etymology && (
-                    <div>
-                      <h4 className="text-sm font-medium text-muted-foreground uppercase tracking-wider mb-2">
-                        Etymology
-                      </h4>
-                      <p className="text-foreground/80">{selectedWord.etymology}</p>
-                    </div>
-                  )}
-                </TabsContent>
-
-                <TabsContent value="pronunciation" className="mt-4 space-y-4">
-                  <div className="bg-secondary/50 rounded-lg p-6 text-center">
-                    <div className="flex items-center justify-center gap-2 mb-4">
-                      <Volume2 className="w-5 h-5 text-primary" />
-                      <span className="text-sm text-muted-foreground uppercase tracking-wider">
-                        Pronunciation
-                      </span>
-                    </div>
-                    <p className="font-serif text-2xl text-foreground">
-                      {selectedWord.pronunciation}
-                    </p>
-                  </div>
-
-                  <div>
-                    <h4 className="text-sm font-medium text-muted-foreground uppercase tracking-wider mb-2">
-                      Transliteration
-                    </h4>
-                    <p className="text-lg italic">{selectedWord.transliteration}</p>
-                  </div>
-                </TabsContent>
-
-                <TabsContent value="usage" className="mt-4 space-y-4">
-                  <div className="bg-secondary/30 rounded-lg p-6 border-l-4 border-primary">
-                    <p className="italic text-foreground/90">"{selectedWord.usage}"</p>
-                  </div>
-
-                  {relatedWords.length > 0 && (
-                    <div>
-                      <h4 className="text-sm font-medium text-muted-foreground uppercase tracking-wider mb-3">
-                        Related Terms
-                      </h4>
-                      <div className="flex flex-wrap gap-2">
-                        {relatedWords.map((related) => (
-                          <Button
-                            key={related.id}
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setSelectedWord(related)}
-                            className="gap-1"
-                          >
-                            {related.sanskrit}
-                            <ExternalLink className="w-3 h-3" />
-                          </Button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </TabsContent>
-              </Tabs>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
+      <WordDetailDialog
+        word={selectedWord}
+        relatedWords={relatedWords}
+        onClose={() => setSelectedWord(null)}
+        onSelectRelated={setSelectedWord}
+        isFavorite={selectedWord ? isFavorite(selectedWord.id) : false}
+        onToggleFavorite={() => selectedWord && handleToggleFavorite(selectedWord)}
+        isLoggedIn={!!user}
+      />
 
       {/* Footer */}
       <footer className="border-t border-border/50 mt-16">
@@ -383,7 +331,7 @@ const Index = () => {
               <div className="w-8 h-8 rounded-full bg-gradient-to-br from-saffron to-lotus flex items-center justify-center">
                 <span className="font-devanagari text-sm text-white">{'\u0913\u0902'}</span>
               </div>
-              <span className="text-sm text-muted-foreground">Yogic Lexicon</span>
+              <span className="text-sm text-muted-foreground">Yogic Lexicon on Nostr</span>
             </div>
             <p className="text-sm text-muted-foreground text-center">
               Vibed with{' '}
@@ -397,7 +345,8 @@ const Index = () => {
               </a>
             </p>
             <p className="text-sm text-muted-foreground italic">
-              {'\u0932\u094B\u0915\u093E\u0903 \u0938\u092E\u0938\u094D\u0924\u093E\u0903 \u0938\u0941\u0916\u093F\u0928\u094B \u092D\u0935\u0928\u094D\u0924\u0941'} - May all beings be happy
+              {'\u0932\u094B\u0915\u093E\u0903 \u0938\u092E\u0938\u094D\u0924\u093E\u0903 \u0938\u0941\u0916\u093F\u0928\u094B \u092D\u0935\u0928\u094D\u0924\u0941'}{' '}
+              - May all beings be happy
             </p>
           </div>
         </div>
@@ -406,15 +355,26 @@ const Index = () => {
   );
 };
 
+// Word Card Component
 interface WordCardProps {
   word: SanskritWord;
   isFavorite: boolean;
   onToggleFavorite: () => void;
   onClick: () => void;
   index: number;
+  isLoggedIn: boolean;
+  isToggling: boolean;
 }
 
-function WordCard({ word, isFavorite, onToggleFavorite, onClick, index }: WordCardProps) {
+function WordCard({
+  word,
+  isFavorite,
+  onToggleFavorite,
+  onClick,
+  index,
+  isLoggedIn,
+  isToggling,
+}: WordCardProps) {
   return (
     <Card
       className="group cursor-pointer hover:shadow-lg transition-all duration-300 hover:-translate-y-1 animate-fade-in opacity-0"
@@ -426,33 +386,227 @@ function WordCard({ word, isFavorite, onToggleFavorite, onClick, index }: WordCa
           <Badge className={`text-xs ${categoryColors[word.category]}`}>
             {categoryLabels[word.category]}
           </Badge>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 -mt-1 -mr-2"
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggleFavorite();
-            }}
-          >
-            <Heart
-              className={`w-4 h-4 transition-colors ${
-                isFavorite ? 'fill-lotus text-lotus' : 'text-muted-foreground group-hover:text-lotus'
-              }`}
-            />
-          </Button>
+          {isLoggedIn && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 -mt-1 -mr-2"
+              disabled={isToggling}
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleFavorite();
+              }}
+            >
+              {isToggling ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Heart
+                  className={`w-4 h-4 transition-colors ${
+                    isFavorite
+                      ? 'fill-lotus text-lotus'
+                      : 'text-muted-foreground group-hover:text-lotus'
+                  }`}
+                />
+              )}
+            </Button>
+          )}
         </div>
         <CardTitle className="font-serif text-xl mt-2">{word.sanskrit}</CardTitle>
         <p className="font-devanagari text-lg text-muted-foreground">{word.devanagari}</p>
       </CardHeader>
       <CardContent>
         <p className="text-sm text-muted-foreground line-clamp-2">{word.meaning}</p>
-        <div className="flex items-center gap-2 mt-3 text-xs text-muted-foreground">
-          <Volume2 className="w-3 h-3" />
-          <span className="italic">{word.pronunciation}</span>
+        <div className="flex items-center justify-between mt-3">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Volume2 className="w-3 h-3" />
+            <span className="italic">{word.pronunciation}</span>
+          </div>
+          {word.pubkey && <AuthorAvatar pubkey={word.pubkey} />}
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+// Author Avatar Component
+function AuthorAvatar({ pubkey }: { pubkey: string }) {
+  const { data } = useAuthor(pubkey);
+
+  return (
+    <Avatar className="w-6 h-6">
+      <AvatarImage src={data?.metadata?.picture} alt={data?.metadata?.name || 'Author'} />
+      <AvatarFallback className="text-[10px]">
+        {(data?.metadata?.name || pubkey.slice(0, 2)).slice(0, 2).toUpperCase()}
+      </AvatarFallback>
+    </Avatar>
+  );
+}
+
+// Empty State Component
+interface EmptyStateProps {
+  showFavoritesOnly: boolean;
+  searchQuery: string;
+  onReset: () => void;
+}
+
+function EmptyState({ showFavoritesOnly, searchQuery, onReset }: EmptyStateProps) {
+  return (
+    <Card className="border-dashed">
+      <CardContent className="py-16 text-center">
+        <div className="w-16 h-16 rounded-full bg-muted mx-auto mb-4 flex items-center justify-center">
+          <Search className="w-8 h-8 text-muted-foreground" />
+        </div>
+        <h3 className="font-serif text-xl text-foreground mb-2">No terms found</h3>
+        <p className="text-muted-foreground max-w-md mx-auto">
+          {showFavoritesOnly
+            ? "You haven't saved any favorites yet. Click the heart icon on any term to save it to Nostr."
+            : 'Try adjusting your search or browse by category to discover Sanskrit terms.'}
+        </p>
+        {(searchQuery || showFavoritesOnly) && (
+          <Button variant="outline" className="mt-4" onClick={onReset}>
+            Show all terms
+          </Button>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// Word Detail Dialog Component
+interface WordDetailDialogProps {
+  word: SanskritWord | null;
+  relatedWords: SanskritWord[];
+  onClose: () => void;
+  onSelectRelated: (word: SanskritWord) => void;
+  isFavorite: boolean;
+  onToggleFavorite: () => void;
+  isLoggedIn: boolean;
+}
+
+function WordDetailDialog({
+  word,
+  relatedWords,
+  onClose,
+  onSelectRelated,
+  isFavorite,
+  onToggleFavorite,
+  isLoggedIn,
+}: WordDetailDialogProps) {
+  if (!word) return null;
+
+  return (
+    <Dialog open={!!word} onOpenChange={() => onClose()}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <div className="flex items-start justify-between">
+            <div>
+              <Badge className={`mb-3 ${categoryColors[word.category]}`}>
+                {categoryLabels[word.category]}
+              </Badge>
+              <DialogTitle className="font-serif text-3xl">{word.sanskrit}</DialogTitle>
+              <DialogDescription className="font-devanagari text-2xl mt-1 text-foreground/80">
+                {word.devanagari}
+              </DialogDescription>
+            </div>
+            <div className="flex items-center gap-2">
+              {word.pubkey && <AuthorAvatar pubkey={word.pubkey} />}
+              {isLoggedIn && (
+                <Button variant="ghost" size="icon" onClick={onToggleFavorite} className="shrink-0">
+                  <Heart
+                    className={`w-5 h-5 ${
+                      isFavorite ? 'fill-lotus text-lotus' : 'text-muted-foreground'
+                    }`}
+                  />
+                </Button>
+              )}
+            </div>
+          </div>
+        </DialogHeader>
+
+        <Tabs defaultValue="meaning" className="mt-4">
+          <TabsList className="w-full">
+            <TabsTrigger value="meaning" className="flex-1">
+              Meaning
+            </TabsTrigger>
+            <TabsTrigger value="pronunciation" className="flex-1">
+              Pronunciation
+            </TabsTrigger>
+            <TabsTrigger value="usage" className="flex-1">
+              Usage
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="meaning" className="mt-4 space-y-4">
+            <div>
+              <h4 className="text-sm font-medium text-muted-foreground uppercase tracking-wider mb-2">
+                Definition
+              </h4>
+              <p className="text-lg">{word.meaning}</p>
+            </div>
+
+            {word.etymology && (
+              <div>
+                <h4 className="text-sm font-medium text-muted-foreground uppercase tracking-wider mb-2">
+                  Etymology
+                </h4>
+                <p className="text-foreground/80">{word.etymology}</p>
+              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="pronunciation" className="mt-4 space-y-4">
+            <div className="bg-secondary/50 rounded-lg p-6 text-center">
+              <div className="flex items-center justify-center gap-2 mb-4">
+                <Volume2 className="w-5 h-5 text-primary" />
+                <span className="text-sm text-muted-foreground uppercase tracking-wider">
+                  Pronunciation
+                </span>
+              </div>
+              <p className="font-serif text-2xl text-foreground">{word.pronunciation}</p>
+            </div>
+
+            <div>
+              <h4 className="text-sm font-medium text-muted-foreground uppercase tracking-wider mb-2">
+                Transliteration
+              </h4>
+              <p className="text-lg italic">{word.transliteration}</p>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="usage" className="mt-4 space-y-4">
+            {word.usage ? (
+              <div className="bg-secondary/30 rounded-lg p-6 border-l-4 border-primary">
+                <p className="italic text-foreground/90">"{word.usage}"</p>
+              </div>
+            ) : (
+              <p className="text-muted-foreground italic">No usage example provided.</p>
+            )}
+
+            {relatedWords.length > 0 && (
+              <div>
+                <h4 className="text-sm font-medium text-muted-foreground uppercase tracking-wider mb-3">
+                  Related Terms
+                </h4>
+                <div className="flex flex-wrap gap-2">
+                  {relatedWords.map((related) => (
+                    <Button
+                      key={related.id}
+                      variant="outline"
+                      size="sm"
+                      onClick={() => onSelectRelated(related)}
+                      className="gap-1"
+                    >
+                      {related.sanskrit}
+                      <ExternalLink className="w-3 h-3" />
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
+      </DialogContent>
+    </Dialog>
   );
 }
 
