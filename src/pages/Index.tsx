@@ -10,6 +10,7 @@ import {
   ExternalLink,
   Users,
   Loader2,
+  Share2,
 } from 'lucide-react';
 
 import { Input } from '@/components/ui/input';
@@ -35,6 +36,8 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useAuthor } from '@/hooks/useAuthor';
 import { useSanskritTerms } from '@/hooks/useSanskritTerms';
 import { useFavorites } from '@/hooks/useFavorites';
+import { useNostrPublish } from '@/hooks/useNostrPublish';
+import { useToast } from '@/hooks/useToast';
 
 import {
   searchWords,
@@ -492,6 +495,47 @@ function WordDetailDialog({
   onToggleFavorite,
   isLoggedIn,
 }: WordDetailDialogProps) {
+  const { user } = useCurrentUser();
+  const { mutateAsync: publishEvent, isPending: isSharing } = useNostrPublish();
+  const { toast } = useToast();
+
+  const handleShareToNostr = async () => {
+    if (!user || !word) return;
+
+    try {
+      const content = `${word.devanagari} ${word.sanskrit} (${word.pronunciation})
+
+${word.meaning}
+
+${word.usage ? `"${word.usage}"` : ''}
+
+#yoga #sanskrit #${word.category}`;
+
+      await publishEvent({
+        kind: 1,
+        content,
+        tags: [
+          ['t', 'yoga'],
+          ['t', 'sanskrit'],
+          ['t', word.category],
+          ['r', `https://yogic-lexicon.shakespeare.wtf`],
+        ],
+      });
+
+      toast({
+        title: 'Shared to Nostr!',
+        description: `"${word.sanskrit}" has been shared to your Nostr feed.`,
+      });
+    } catch (error) {
+      console.error('Failed to share:', error);
+      toast({
+        title: 'Failed to share',
+        description: 'There was an error sharing to Nostr. Please try again.',
+        variant: 'destructive',
+      });
+    }
+  };
+
   if (!word) return null;
 
   return (
@@ -511,13 +555,29 @@ function WordDetailDialog({
             <div className="flex items-center gap-2">
               {word.pubkey && <AuthorAvatar pubkey={word.pubkey} />}
               {isLoggedIn && (
-                <Button variant="ghost" size="icon" onClick={onToggleFavorite} className="shrink-0">
-                  <Heart
-                    className={`w-5 h-5 ${
-                      isFavorite ? 'fill-lotus text-lotus' : 'text-muted-foreground'
-                    }`}
-                  />
-                </Button>
+                <>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={handleShareToNostr}
+                    disabled={isSharing}
+                    className="shrink-0"
+                    title="Share to Nostr"
+                  >
+                    {isSharing ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <Share2 className="w-5 h-5 text-muted-foreground hover:text-primary" />
+                    )}
+                  </Button>
+                  <Button variant="ghost" size="icon" onClick={onToggleFavorite} className="shrink-0">
+                    <Heart
+                      className={`w-5 h-5 ${
+                        isFavorite ? 'fill-lotus text-lotus' : 'text-muted-foreground'
+                      }`}
+                    />
+                  </Button>
+                </>
               )}
             </div>
           </div>
